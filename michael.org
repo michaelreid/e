@@ -1,0 +1,1407 @@
+* About this file
+   :PROPERTIES:
+   :CUSTOM_ID: babel-init
+   :END:      
+   <<babel-init>>
+
+
+* 1. Setting up Emacs with this file
+
+**   1.1 Introduction
+   This file is inspired by [[https://raw.githubusercontent.com/lunaryorn/.emacs.d/master/init.el][Sebastien Wiesner's]] and [[https://github.com/sachac/.emacs.d/blob/gh-pages/Sacha.org][Sacha Chua's]] Emacs configurations
+   
+   I wanted to have my Emacs configuration managed in one structured file (ie Sebastien) and wanted
+   it structured and managed in Org (ie Sacha).
+
+**   1.2 Installing Emacs
+
+    Setup Emacs
+    ===========
+ 1. Install Emacs, ie. download and build from source
+
+ 2. Remove all contents of .emacs.d/
+
+ 3. Download latest version of this Org file into .emacs.d/
+
+ 4. Replace contents of init.el (or create new file) with:
+    (package-initialize)
+    (require 'ob-tangle)
+    (org-babel-load-file "~/.emacs.d/michael.org")
+
+ 5. Start Emacs to install configuration and dependencies
+
+*** Test and warn for lastest build
+#+begin_src emacs-lisp
+;;;
+;;;
+;;;
+;;; Sebastien Wiesner - Test for latest build
+;;;
+
+
+;;;
+;;; Initialization
+
+(when (version< emacs-version "25")
+  (warn "This configuration needs Emacs trunk, but this is %s!" emacs-version))
+
+;; And disable the site default settings
+(setq inhibit-default-init t)
+
+(defun lunaryorn-snapshot-version-p (version)
+  "Whether VERSION is an Emacs snapshot version."
+  (pcase-let ((`(,_ ,_ ,build) (version-to-list version)))
+    ;; Snapshots with build numbers > 90 are pretests which come from proper
+    ;; release tarballs and don't need to be rebuild weekly
+    (and (>= build 50) (<= build 90))))
+
+(when (lunaryorn-snapshot-version-p emacs-version)
+  ;; When on a snapshot version, warn if the build is older than a week to
+  ;; ensure that we stay up to date.
+  (run-with-idle-timer
+   2 nil
+   (lambda ()
+     (let ((time-since-build (time-subtract (current-time) emacs-build-time)))
+       (when (> (time-to-number-of-days time-since-build) 7)
+         (lwarn 'emacs :warning "Your Emacs build is more than a week old!"))))))
+#+end_src
+
+
+* 2. Emacs configuration
+
+**   2.1 Manage Packages with Use-Package
+
+***     Package Manager
+
+Use Package, package managment tool built by Jonathon Wiegley
+
+DOCUMENTATION
+-------------
+[[https://github.com/jwiegley/use-package/blob/master/README.md][Use Package README]]
+
+#+begin_src emacs-lisp
+
+;;;
+;;; Package management
+;;;
+
+
+;; Please don't load outdated byte code
+(setq load-prefer-newer t)
+
+(require 'package)
+(setq package-enable-at-startup nil)
+(add-to-list 'package-archives '("melpa" . "https://melpa.org/packages/"))
+
+(package-initialize)
+
+;; Bootstrap `use-package'
+(unless (package-installed-p 'use-package)
+  (package-refresh-contents)
+  (package-install 'use-package))
+
+;;; Requires
+
+(eval-when-compile
+  (require 'use-package))
+
+#+end_src
+
+***     Auto-update packages on startup
+
+#+begin_src emacs-lisp
+
+(defun package-upgrade-all ()
+  "Upgrade all packages automatically without showing *Packages* buffer."
+  (interactive)
+  (package-refresh-contents)
+  (let (upgrades)
+    (cl-flet ((get-version (name where)
+                (let ((pkg (cadr (assq name where))))
+                  (when pkg
+                    (package-desc-version pkg)))))
+      (dolist (package (mapcar #'car package-alist))
+        (let ((in-archive (get-version package package-archive-contents)))
+          (when (and in-archive
+                     (version-list-< (get-version package package-alist)
+                                     in-archive))
+            (push (cadr (assq package package-archive-contents))
+                  upgrades)))))
+    (if upgrades
+        (when (yes-or-no-p
+               (message "Upgrade %d package%s (%s)? "
+                        (length upgrades)
+                        (if (= (length upgrades) 1) "" "s")
+                        (mapconcat #'package-desc-full-name upgrades ", ")))
+          (save-window-excursion
+            (dolist (package-desc upgrades)
+              (let ((old-package (cadr (assq (package-desc-name package-desc)
+                                             package-alist))))
+                (package-install package-desc)
+                (package-delete  old-package)))))
+      (message "All packages are up to date"))))
+
+(add-hook 'window-setup-hook 'package-upgrade-all)
+
+#+end_src
+
+
+**   2.2 Core Packages for Development
+
+***     Package list, description and manuals
+
+   |----+---------------------------------+---------------------------------+------------------------------|
+   |    | Package                         | Description                     | External Link                |
+   |----+---------------------------------+---------------------------------+------------------------------|
+   |  1 | clojure-mode                    | clojure editining major mode    | [[https://github.com/clojure-emacs/clojure-mode][clojure mode home]]            |
+   |  2 | clojure-mode-extra-font-locking | more fancy clojure              | [[https://marmalade-repo.org/packages/clojure-mode-extra-font-locking][project home]]                 |
+   |  3 | cider                           | clojure repl                    | [[https://github.com/clojure-emacs/cider][cider home]]                   |
+   |  4 | paredit                         | keep parentheses balanced       | [[http://www.emacswiki.org/emacs/PareditCheatsheet][paredit cheatsheet emacswiki]] |
+   |  5 | smartparens                     | keep parenthese balanced II     | [[https://github.com/Fuco1/smartparens][smartparens homepage]]         |
+   |  6 | rainbow delimiters              | pretty parentheses              | [[https://www.emacswiki.org/emacs/RainbowDelimiters][rainbow delimiters emacswiki]] |
+   |  7 | rvm                             | ruby version manager            | [[https://github.com/senny/rvm.el/blob/master/README.md][rvm.el README]]                |
+   |  8 | tagedit                         | for editing html tags like sexp | [[https://github.com/magnars/tagedit/blob/master/README.md][tagedit readme]]               |
+   |  9 | web-mode                        | major mode for web templates    | [[http://web-mode.org/][web-mode home]]                |
+   | 10 | magit                           | git in emacs                    | [[https://magit.vc/manual/magit.html#Top][magit user manual]]            |
+   | 11 | inf-ruby-mode                   | run ruby process in buffer      | [[https://github.com/nonsequitur/inf-ruby/blob/master/README.md][inf-ruby README]]              |
+   |    |                                 |                                 |                              |
+   |----+---------------------------------+---------------------------------+------------------------------|
+
+***     Core Development Use Package Declarations
+
+#+begin_src emacs-lisp
+
+  ;;;
+  ;;; 2.2 Core Packages for Development
+  ;;; ---------------------------------
+  ;;; 
+  ;;; Documentation for each package linked in michael.org
+  ;;;
+
+  ;; 1
+  (use-package clojure-mode
+    :ensure t
+    :config
+    (add-to-list 'auto-mode-alist '("\\.cljs.*$" . clojure-mode)))
+
+  ;; 2
+  (use-package clojure-mode-extra-font-locking
+    :ensure t
+    :config
+    (require 'clojure-mode-extra-font-locking))
+
+  ;; 3
+  (use-package cider
+    :ensure t
+    :config
+  ;  (add-hook 'cider-mode-hook 'cider-turn-on-eldoc-mode)
+  ;  (setq cider-repl-pop-to-buffer-on-connect t)
+  ;  (setq cider-show-error-buffer t)
+  ;  (setq cider-auto-select-error-buffer t)
+  ;  (setq cider-repl-history-file "~/.emacs.d/.cider-history")
+  ;  (setq cider-repl-wrap-history t)
+  ;  (add-hook 'cider-repl-mode-hook 'paredit-mode)
+  )
+
+  ;; 4
+  (use-package paredit
+    :ensure t
+    :config
+    (add-hook 'prog-mode-hook #'paredit-mode))
+
+  ;; 5
+  (use-package smartparens
+    :ensure t
+    :config
+    (require 'smartparens-config)
+    (add-hook 'prog-mode-hook #'smartparens-mode))
+
+  ;; 6
+  (use-package rainbow-delimiters
+    :ensure t
+    :config
+    (add-hook 'prog-mode-hook #'rainbow-delimiters-mode))
+
+  ;; 7
+  (use-package rvm
+    :ensure t
+    :config
+    (rvm-use-default))
+
+  ;; 8
+  (use-package tagedit
+    :ensure t)
+
+  ;; 9
+  (use-package web-mode
+    :ensure t
+    :config
+    (setq web-mode-enable-current-element-highlight t))
+
+  ;; 10
+  (use-package magit
+    :ensure t
+    :config
+    (global-set-key (kbd "C-x g") 'magit-status))
+
+  ;; 11
+  (use-package inf-ruby
+    :ensure t
+    :config
+    (add-hook 'ruby-mode-hook 'inf-ruby-minor-mode))
+
+#+end_src
+
+**   2.3 System Configuration
+
+***     Use Helm as M-x replacement
+
+Helm is a whole framework for M-x
+
+DOCUMENTATION
+-------------
+[[https://tuhdo.github.io/helm-intro.html][helm user manual]]
+
+#+begin_src emacs-lisp
+
+(use-package helm
+  :ensure t
+  :config
+  (dired-async-mode 1)
+  (global-set-key (kbd "M-x") 'helm-M-x))
+
+#+end_src
+
+***     Use EShell as Shell Environment
+
+DOCUMENTATION
+-------------
+[[https://www.emacswiki.org/emacs/EshellMultipleEshellBuffers#toc3][EmacsWiki Multi-EShell]]
+
+Below is multi-eshell file from Emacs Wiki
+
+#+begin_src emacs-lisp
+;;     This program is free software: you can redistribute it and/or modify
+;;     it under the terms of the GNU General Public License as published by
+;;     the Free Software Foundation, either version 3 of the License, or
+;;     (at your option) any later version.
+
+;;     This program is distributed in the hope that it will be useful,
+;;     but WITHOUT ANY WARRANTY; without even the implied warranty of
+;;     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;;     GNU General Public License for more details.
+
+;;     You should have received a copy of the GNU General Public License
+;;     along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+;; This file is written by Chris Stucchio, and the latest version is available at
+;;
+;; http://cims.nyu.edu/~stucchio
+;;
+;; This file makes it easier to use multiple shells within emacs. Features:
+;;
+;; multi-eshell -- Creates a NEW shell, even if one already exists.
+;; multi-eshell-switch -- If not in a shell buffer, return to the last EXISTING
+;;                        shell buffer. Otherwise, switch to the next buffer in
+;;                        the shell ring.
+;; multi-eshell-go-back -- Switch to the previous buffer in the shell ring.
+;;
+;; The customizable function multi-eshell-shell-function is user customizable, and lets the user
+;; pick the particular shell to use (e.g. *ansi-term*, *shell*, *eshell*, etc).
+
+(defun if-void (arg default)
+  (if (boundp arg)
+      (eval arg)
+    default
+      )
+)
+
+(defgroup multi-eshell nil
+  "Simple support for having multiple shells open."
+  :group 'languages)
+
+(defcustom multi-eshell-shell-function '(eshell)
+  "Command called to create shell"
+  :group 'multi-eshell)
+
+(defcustom multi-eshell-name "*eshell*" "The name of the buffer opened by the shell command."
+  :type 'string
+  :group 'multi-eshell)
+
+(defun multi-eshell-function () "This function opens the appropriate shell." (eval multi-eshell-shell-function) )
+(defvar multi-eshell-function `(eshell) ) ;;; Defines the shell. ('shell) or ('eshell)
+(defvar multi-eshell-name "*eshell*") ;;; Name of default shell or eshell buffer
+
+(defvar multi-eshell-ring (make-ring 100) "This stores a bunch of buffers, which are shells created by multi-eshell." )
+(setq multi-eshell-index 0 )
+(defvar multi-eshell-last-buffer nil)
+
+(defun multi-eshell-is-current-buffer-current-multi-eshell (&optional ignored)
+  "Checks if current buffer is the current multi-eshell."
+  (eq (current-buffer) (ring-ref multi-eshell-ring multi-eshell-index))
+)
+
+(defun multi-eshell-switch-to-current-shell (&optional ignored)
+  "Switch to shell buffer."
+  (if (buffer-live-p (ring-ref multi-eshell-ring multi-eshell-index))
+      (switch-to-buffer (ring-ref multi-eshell-ring multi-eshell-index))
+    )
+)
+
+(defun multi-eshell-current-shell (&optional ignored)
+  "Returns the current multi-eshell."
+  (ring-ref multi-eshell-ring multi-eshell-index)
+)
+
+(defun multi-eshell-switch-to-next-live-shell (&optional ignored)
+  "Switches to the next live shell. Creates one if none exists."
+  (interactive "p")
+  (let ((still-looking t)
+        (empty nil))
+    (while (and still-looking (not empty))
+      (if (ring-empty-p multi-eshell-ring)
+          (progn
+            (setq empty t)
+            (multi-eshell 1)
+            )
+        (progn
+          (if (buffer-live-p (ring-ref multi-eshell-ring multi-eshell-index))
+              (progn
+                (setq multi-eshell-index (+ multi-eshell-index 1))
+                (switch-to-buffer (ring-ref multi-eshell-ring multi-eshell-index))
+                (setq still-looking nil)
+                )
+            (ring-remove multi-eshell-ring multi-eshell-index)
+            )
+          )
+        )
+      )
+    )
+)
+
+;;;###autoload
+(defun multi-eshell-go-back (&optional ignored)
+  "Switch to buffer multi-eshell-last-buffer."
+  (interactive "p")
+  (if (buffer-live-p multi-eshell-last-buffer)
+      (switch-to-buffer multi-eshell-last-buffer)
+    (message "Last buffer visited before multi-eshell is gone. Nothing to go back to..")
+     ))
+
+
+;;;###autoload
+(defun multi-eshell-switch (&optional ignored)
+  "If current buffer is not an multi-eshell, switch to current multi-eshell buffer. Otherwise, switch to next multi-eshell buffer."
+  (interactive "p")
+  (progn
+    (setq multi-eshell-last-buffer (current-buffer))
+    (let ((still-looking t)
+          (empty nil))
+      (if (ring-empty-p multi-eshell-ring)
+          (multi-eshell 1)
+        (if (and (buffer-live-p (multi-eshell-current-shell) )
+             (not (eq (multi-eshell-current-shell) (current-buffer))))
+        (switch-to-buffer (multi-eshell-current-shell))
+      (multi-eshell-switch-to-next-live-shell)
+      )
+    )
+  )))
+
+;;;###autoload
+(defun multi-eshell (&optional numshells)
+  "Creates a shell buffer. If one already exists, this creates a new buffer, with the name '*shell*<n>', where n is chosen by the function generate-new-buffer-name."
+  (interactive "p")
+  (progn
+    (setq multi-eshell-last-buffer (current-buffer))
+    (dotimes (i (if-void 'numshells 1) nil)
+      (let ( (tempname (generate-new-buffer-name "*tempshell*"))
+             (new-buff-name (generate-new-buffer-name multi-eshell-name))
+             (localdir default-directory)
+             )
+        (if (eq (get-buffer multi-eshell-name) nil) ;If a
+            (progn
+              (multi-eshell-function)
+              ;(process-send-string (get-buffer-process new-buff-name) (concat "cd " localdir "\n"))
+              (ring-insert multi-eshell-ring (current-buffer) )
+              (setq multi-eshell-index (+ multi-eshell-index 1))
+              )
+          (progn
+            (interactive)
+            (multi-eshell-function)
+            (rename-buffer tempname)
+            (multi-eshell-function)
+            (rename-buffer new-buff-name )
+            (switch-to-buffer tempname)
+            (rename-buffer multi-eshell-name)
+        (switch-to-buffer new-buff-name)
+        ;(process-send-string (get-buffer-process new-buff-name) (concat "cd " localdir "\n"))
+        (ring-insert multi-eshell-ring (current-buffer) )
+        (setq multi-eshell-index (+ multi-eshell-index 1))
+        )
+          )
+        )
+      )
+    )
+  )
+
+(defun shell-with-name (name)
+  "Creates a shell with name given by the first argument, and switches to it. If a buffer with name already exists, we simply switch to it."
+  (let ((buffer-of-name (get-buffer name))
+        (tempname (generate-new-buffer-name "*tempshell*") ) )
+    (cond ((bufferp buffer-of-name) ;If the buffer exists, switch to it (assume it is a shell)
+           (switch-to-buffer name))
+          ( (bufferp (get-buffer multi-eshell-name))
+          (progn
+            (multi-eshell-function)
+            (rename-buffer tempname)
+            (multi-eshell-function)
+            (rename-buffer name)
+            (switch-to-buffer tempname)
+            (rename-buffer multi-eshell-name)
+            (switch-to-buffer name)))
+          ( t
+            (progn
+              (multi-eshell-function)
+              (rename-buffer name)
+              )
+            )
+          )
+    )
+  )
+
+(provide 'multi-eshell)
+
+#+end_src
+
+***     Shell Integration on Mac OSX
+
+#+begin_src emacs-lisp
+
+;;;
+;;; Integrate $PATH with GUI Emacs
+;;;
+
+(use-package exec-path-from-shell
+    :ensure t)
+
+#+end_src
+
+***     Lein integration with EShell
+
+DOCUMENTATION
+-------------
+[[https://github.com/technomancy/lein.el][Lein.el README (from author of Leinigen)]]
+
+#+begin_src emacs-lisp
+;;; lein.el --- Eshell interface to Leiningen
+
+;; Copyright © 2013 Phil Hagelberg
+
+;; Author: Phil Hagelberg
+;; URL: https://github.com/technomancy/lein.el
+;; Version: 0.1
+;; Created: 2013-01-26
+;; Keywords: tools, convenience
+;; Package-Requires: ((nrepl "0.1.7"))
+
+;; Additional contributions by:
+;; - Gary W. Johnson (lambdatronic@gmail.com)
+
+;; This file is NOT part of GNU Emacs.
+
+;;; Commentary:
+
+;; This provides an eshell interface to the Leiningen project
+;; automation tool for Clojure. (http://leiningen.org) It communicates
+;; over nREPL (https://github.com/kingtim/nrepl.el) to avoid starting
+;; a new process for every command. Note that tasks which call
+;; eval-in-project will still start a project JVM; it's only
+;; Leiningen's own startup time which is avoided.
+
+;;; Usage
+
+;; Currently you need to launch Leiningen once per Emacs instance with
+;; M-x lein-launch. Then start eshell with M-x eshell and use
+;; Leiningen as you would normally.
+
+;;; License:
+
+;; This program is free software; you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation; either version 3, or (at your option)
+;; any later version.
+;;
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+;;
+;; You should have received a copy of the GNU General Public License
+;; along with GNU Emacs; see the file COPYING.  If not, write to the
+;; Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+;; Boston, MA 02110-1301, USA.
+
+;;; Code:
+
+(require 'cl)
+;(require 'nrepl)
+
+;;==========================================================
+;; Section 1: Formulating the Leiningen launch command
+;; - Construct the java invocation
+;; - Download the leiningen-*-standalone.jar if not present
+;;==========================================================
+
+(defcustom lein-home (expand-file-name "~/.lein") "Leiningen home directory.")
+
+(defcustom lein-version "2.0.0"
+  "Version of Leiningen to use. Note that changing this
+  arbitrarily will not always work.")
+
+(defcustom lein-java-command (or (getenv "LEIN_JAVA_CMD")
+                                 (getenv "JAVA_CMD")
+                                 "java")
+  "Java executable to use to launch Leiningen.")
+
+(defcustom lein-jvm-opts (or (getenv "LEIN_JVM_OPTS") "-Xms64m -Xmx512m")
+  "Extra arguments to the java command to launch Leiningen.")
+
+(defvar lein-download-url
+  "https://leiningen.s3.amazonaws.com/downloads/leiningen-%s-standalone.jar")
+
+(defun lein-self-install-callback (status lein-jar)
+  (search-forward "\n\n")
+  (write-region (point) (point-max) lein-jar)
+  (message "Leiningen download complete. Please retry your command."))
+
+(defun lein-self-install (lein-jar)
+  (message "Leiningen not found. Downloading...")
+  (sit-for 1) ;; Why the delay here?
+  (url-retrieve
+   (format lein-download-url lein-version)
+   'lein-self-install-callback (list lein-jar)))
+
+;; TODO: launch lein process with nohup so it can outlast Emacs
+;; TODO: check for repl-port written to lein-home
+(defun lein-launch-command ()
+  (let ((lein-jar (format "%s/self-installs/leiningen-%s-standalone.jar"
+                          lein-home lein-version)))
+    (if (not (file-exists-p lein-jar))
+        (progn (lein-self-install lein-jar) nil)
+      (concat "LEIN_VERSION=" lein-version " "
+              lein-java-command " -client -XX:+TieredCompilation"
+              " -Xbootclasspath/a:" lein-jar " " lein-jvm-opts
+              " -Dfile.encoding=UTF-8 -Dmaven.wagon.http.ssl.easy=false"
+              " -Dleiningen.original.pwd=" default-directory
+              " -classpath " lein-jar " clojure.main -m"
+              " leiningen.core.main repl :headless"))))
+
+;;==========================================================
+;; Section 2: Formulating the Leiningen task command
+;; - Locate and read in the current project.clj
+;; - Construct the task invocation (in Clojure)
+;; - Throw an error if a trampoline task is encountered
+;;==========================================================
+
+(defun lein-project-root (&optional file)
+  (locate-dominating-file (or file default-directory) "project.clj"))
+
+(defun lein-task-command (task &rest args)
+  (if (string= "trampoline" task)
+      (error "Cannot trampoline from lein.el")
+    (let* ((project-clj (expand-file-name "project.clj" (lein-project-root)))
+           (project-rdr (if (file-exists-p project-clj)
+                            (format "(leiningen.core.project/read \"%s\")" project-clj)
+                          "nil"))
+           (string-args (or (mapcar (apply-partially 'format "\"%s\"") args) [])))
+      (format "(binding [leiningen.core.main/*exit-process?* false]
+                 (try (leiningen.core.main/apply-task \"%s\" %s '%s)
+                      (catch Exception e
+                        (if (:exit-code (ex-data e))
+                          (when-not (= \"Suppressed exit\" (.getMessage e))
+                            (println (.getMessage e)))
+                          (clj-stacktrace.repl/pst e)))))"
+              task project-rdr string-args))))
+
+;;==========================================================
+;; Section 3: Launching Leiningen in the background
+;; - If no leiningen-*-standalone.jar, install it and exit
+;; - Otherwise, run the lein-launch-command asynchronously
+;;   and direct its output to lein-server-buffer
+;; - Use lein-server-filter to filter its output
+;; - Use lein-server-sentinel to handle signals sent to it
+;; - Set process-coding-system to utf-8-unix
+;;==========================================================
+
+(defvar lein-server-buffer "*lein-server*")
+
+(defvar lein-nrepl-connection-buffer "*lein-nrepl-connection*")
+
+(defvar lein-words-of-inspiration
+  '("Take this project automation tool, brother.  May it serve you well."))
+
+(defun lein-server-filter (process output)
+  (when (buffer-live-p (process-buffer process))
+    (with-current-buffer (process-buffer process)
+      (save-excursion
+        ;; Insert output and advance process-mark
+        (goto-char (process-mark process))
+        (insert output)
+        (set-marker (process-mark process) (point))
+        ;; Search buffer for nREPL server port
+        (unless (process-get process :lein-nrepl-server-port)
+          (goto-char (point-min))
+          (when (re-search-forward "nREPL server started on port \\([0-9]+\\)\n" nil t)
+            (process-put process :lein-nrepl-server-port (string-to-number (match-string 1)))
+            ;; Connect to the local nREPL server
+            (let* ((nrepl-words-of-inspiration lein-words-of-inspiration)
+                   (original-nrepl-connection-list nrepl-connection-list)
+                   (nrepl-process (nrepl-connect "localhost"
+                                                 (process-get process
+                                                              :lein-nrepl-server-port))))
+              ;; Set some definitions local to the lein-server buffer:
+              ;; - nrepl-connection-buffer = name of buffer associated with nrepl-client process
+              ;; - lein-nrepl-connection-buffer = name of buffer associated with nrepl-client process
+              (with-current-buffer (process-buffer process)
+                (setq nrepl-connection-buffer
+                      (buffer-name (process-buffer nrepl-process))
+                      lein-nrepl-connection-buffer
+                      (buffer-name (process-buffer nrepl-process))))
+              ;; Set some definitions local to the nrepl-client buffer:
+              ;; - nrepl-server-buffer = name of buffer associated with lein-server process (*lein-server*)
+              ;; - lein-server-buffer = name of buffer associated with lein-server process (*lein-server*)
+              (with-current-buffer (process-buffer nrepl-process)
+                (setq nrepl-server-buffer
+                      (buffer-name (process-buffer process))
+                      lein-server-buffer
+                      (buffer-name (process-buffer process))))
+              ;; Wait for the *nrepl* buffer to pop up, and hide it immediately
+              (let ((max-time-remaining 4000)) ;; 4 seconds
+                (while (and (not (nrepl-current-nrepl-buffer))
+                            (> max-time-remaining 0))
+                  (sit-for 0 100)
+                  (decf max-time-remaining 100)))
+              (if (nrepl-current-nrepl-buffer)
+                  (delete-windows-on (nrepl-current-nrepl-buffer)))
+              ;; Restore original-nrepl-connect-list
+              (when original-nrepl-connection-list
+                (nrepl-make-repl-connection-default
+                 (car original-nrepl-connection-list))))))))))
+
+(defun lein-server-sentinel (process event)
+  (when (buffer-live-p (process-buffer process))
+    (let* ((buf (process-buffer process))
+           (problem (with-current-buffer buf (buffer-string))))
+      (when buf
+        (kill-buffer buf))
+      (cond ((string-match "^killed" event) nil)
+            ((string-match "^hangup" event) (nrepl-quit))
+            (t (error "Could not start Leiningen: %s" (or problem "")))))))
+
+(defun lein-launch ()
+  (interactive)
+  (let ((command (lein-launch-command)))
+    (when command
+      (let* ((default-directory lein-home)
+             (process (start-process-shell-command
+                       "lein-server" lein-server-buffer
+                       command)))
+        (set-process-filter process 'lein-server-filter)
+        (set-process-sentinel process 'lein-server-sentinel)
+        (set-process-coding-system process 'utf-8-unix 'utf-8-unix)
+        (message "Starting Leiningen...")
+        nil)))) ;; Suppress eshell output
+
+;;==========================================================
+;; Section 4: Eshell interface
+;; - Launch Leiningen if not already running
+;; - Otherwise, send the Leiningen task command to nREPL
+;;   and register lein-handler as the callback function
+;; - Then sit and wait until lein-handler is finished
+;;==========================================================
+
+(defun lein-launched? ()
+  (and (get-buffer-process lein-nrepl-connection-buffer)
+       (process-live-p (get-buffer-process lein-nrepl-connection-buffer))))
+
+(defun lein-handler (task-complete? buffer response)
+  (let ((out (cdr (assoc "out" response)))
+        (err (cdr (assoc "err" response)))
+        (status (cdr (assoc "status" response))))
+    (when out
+      (with-current-buffer buffer
+        (eshell-output-filter nil out)))
+    (when err
+      (with-current-buffer buffer
+        (eshell-output-filter nil err)))
+    (when (member "eval-error" status)
+      (nrepl-dbind-response response (value ns out err status id ex root-ex
+                                            session)
+        (funcall nrepl-err-handler buffer ex root-ex session)))
+    (when (or (member "done" status)
+              (member "eval-error" status))
+      (setf (car task-complete?) t))))
+      ;; (eshell-remove-process-entry entry)))) ; FIXME: entry appears to be unbound
+
+(defun eshell/lein (&rest args)
+  (if (lein-launched?)
+      (let ((nrepl-connection-buffer lein-nrepl-connection-buffer)
+            ;; woo promises for dummies
+            (task-complete? (list nil)))
+        (nrepl-send-string (apply 'lein-task-command (or args '("help")))
+                           (apply-partially 'lein-handler
+                                            task-complete?
+                                            (current-buffer)))
+        (while (not (car task-complete?))
+          (sit-for eshell-process-wait-seconds
+                   eshell-process-wait-milliseconds)))
+    (lein-launch) ; TODO: callback to execute command instead of manual retry
+    "Launching Leiningen. Wait till it's up, and try your command again."))
+
+;; TODO: port from pcmpl-lein.el
+(defun pcomplete/lein ())
+
+;; Local Variables:
+;; byte-compile-warnings: (not cl-functions)
+;; End:
+
+(provide 'lein)
+;;; lein.el ends here
+#+end_src
+
+***     Unique Buffer Names
+
+#+begin_src emacs-lisp
+
+;; The following are derived from ............ Clojure For The Brave & True
+
+;;
+;; "When several buffers visit identically-named files,
+;; Emacs must give the buffers distinct names. The usual method
+;; for making buffer names unique adds ‘<2>’, ‘<3>’, etc. to the end
+;; of the buffer names (all but one of them).
+;; The forward naming method includes part of the file's directory
+;; name at the beginning of the buffer name
+;; https://www.gnu.org/software/emacs/manual/html_node/emacs/Uniquify.html
+(require 'uniquify)
+(setq uniquify-buffer-name-style 'forward)
+
+#+end_src
+
+***     Ido Mode Settings (Interactively Do Things)
+
+Ido is completion framework. Very helpful for searching for files/buffers
+Ido is 'Interactively Do Things'
+Smex allows the use of ido on entering 'M-x' (but preferance at moment for Helm)
+
+DOCUMENTATION
+-------------
+[[https://www.emacswiki.org/emacs/InteractivelyDoThings][Ido Emacs Wiki]]
+[[http:https://github.com/DarwinAwardWinner/ido-ubiquitous/blob/master/README.md][Ido Ubiquitous README]]
+[[https://github.com/nonsequitur/smex/blob/master/README.markdown][Smex README]]
+
+#+begin_src emacs-lisp
+
+;; ido-mode allows you to more easily navigate choices. For example,
+;; when you want to switch buffers, ido presents you with a list
+;; of buffers in the the mini-buffer. As you start to type a buffer's
+;; name, ido will narrow down the list of buffers to match the text
+;; you've typed in
+;; http://www.emacswiki.org/emacs/InteractivelyDoThings
+(ido-mode 1)
+(ido-everywhere 1)
+
+;; This allows partial matches, e.g. "tl" will match "Tyrion Lannister"
+(setq ido-enable-flex-matching t)
+
+;; Don't try to match file across all "work" directories; only match files
+;; in the current directory displayed in the minibuffer
+(setq ido-auto-merge-work-directories-length -1)
+
+;; Includes buffer names of recently open files, even if they're not
+;; open now
+(setq ido-use-virtual-buffers t)
+
+;; Use ido-ubiquitous, for ido-mode for more than file/buffer searches
+;; README: https://github.com/DarwinAwardWinner/ido-ubiquitous/blob/master/README.md
+
+(use-package ido-ubiquitous
+  :ensure t
+  :config
+  (require 'ido-ubiquitous)
+  (ido-ubiquitous-mode 1))
+
+;(use-package smex
+;  :ensure t
+;  :config
+;  (smex-initialize)
+;  (global-set-key (kbd "M-x") 'smex))
+
+#+end_src
+
+***     Use iBuffer for Buffer List
+
+iBuffer is much better than default buffer menu which allows operations on buffers
+in much the same way as Dired
+
+DOCUMENTATION
+-------------
+[[https://www.emacswiki.org/emacs/IbufferMode][iBuffer EmacsWiki]]
+    
+#+begin_src emacs-lisp
+
+;; Use iBuffer for list of buffers to allow editing like Dired
+(global-set-key (kbd "C-x C-b") 'ibuffer)
+
+#+end_src
+
+***     No default yes-or-no
+
+#+begin_src
+
+;; Changes all yes/no questions to y/n type
+(fset 'yes-or-no-p 'y-or-n-p)
+
+#+end_src
+
+***     Start in Fullscreen
+
+Set the Emacs frame to MacOSX Fullscreen and browse with Chrome 
+(with Moly HaH extensions installed).
+
+Use TotalSpaces window manager to enable shortcuts and quick switch between
+Emacs and Chrome:
+
+C-[ for Emacs fullscreen
+C-] for Chrome fullscreen
+
+#+begin_src emacs-lisp
+(set-frame-parameter nil 'fullscreen 'fullboth)
+#+end_src 
+
+***     Use CMD on MacOSX as Meta (not Option/ALT)
+#+begin_src emacs-lisp
+(setq mac-option-key-is-meta nil)
+(setq mac-command-modifier 'meta)
+(setq mac-right-command-modifier 'meta)
+#+end_src
+
+***     Use which-key for displaying available key-binding in mini-buffer
+#+begin_src emacs-lisp
+(use-package which-key)
+(require 'which-key)
+(which-key-mode)
+#+end_src
+
+
+**   2.4 Emacs User Interface
+
+***     Remove the menu bar and the toolbar
+
+Remove unnecessary visual elements
+
+#+begin_src emacs-lisp +n
+
+(menu-bar-mode -1)
+(tool-bar-mode -1)
+
+#+end_src
+
+***     Remove Scrollbars
+
+Don't show native OS scroll bars for buffers because they're redundant
+
+#+begin_src emacs-lisp
+
+(when (fboundp 'scroll-bar-mode)
+  (scroll-bar-mode -1))
+
+#+end_src
+
+***     Highlight Current Row
+
+#+begin_src emacs-lisp
+
+;; Highlight current line
+(global-hl-line-mode 1)
+
+;; highlight current row
+(set-face-attribute 'highlight nil :background "#90ee90" :foreground "black")
+
+#+end_src
+
+***     Default Font Size
+
+#+begin_src emacs-lisp
+
+;; increase font size for better readability
+(set-face-attribute 'default nil :height 140)
+
+#+end_src 
+
+***     Default Frame Size when start up Eamcs
+
+#+begin_src emacs-lisp
+
+;; Uncomment the lines below by removing semicolons and play with the
+;; values in order to set the width (in characters wide) and height
+;; (in lines high) Emacs will have whenever you start it
+;; (setq initial-frame-alist '((top . 0) (left . 0) (width . 177) (height . 53)))
+
+#+end_src
+
+***     Full Path in Title Bar
+TODO: Full path in modeline
+#+begin_src emacs-lisp
+
+;; full path in title bar
+(setq-default frame-title-format "%b (%f)")
+
+#+end_src
+
+***     No Bell (e.g. when tap C-g repeatedly)
+
+#+begin_src
+
+;; no bell
+(setq ring-bell-function 'ignore)
+
+#+end_src
+
+***     Settings for Transparent Windows
+
+[[http://stackoverflow.com/questions/21946382/how-to-get-transparent-window-in-gnu-emacs-on-osx-mavericks][stackoverflow on transparent windows]]
+
+#+begin_src emacs-lisp
+
+;; Settings for transparent windows
+;; (set-frame-parameter (selected-frame) 'alpha '(65 65))
+;; (add-to-list 'default-frame-alist '(alpha 65 65))
+
+#+end_src
+
+***     Colour Theme
+
+Downloading from source is only method I found to load theme with Org-babel mode
+
+DOCUMENTATION
+------------
+atom-one-dark-theme : [[https://github.com/jonathanchu/atom-one-dark-theme/blob/master/README.md][README]]
+
+
+#+begin_src emacs-lisp
+
+;(shell-command "mkdir -p ~/.emacs.d/m_themes")
+;(shell-command "git clone https://github.com/jonathanchu/atom-one-dark-theme.git")
+
+(use-package atom-one-dark-theme
+  :ensure t
+  :load-path "~/.emacs.d/m_themes")
+
+#+end_src
+
+***     Use Telephone as Modeline replacement
+
+
+#+begin_src emacs-lisp
+
+(use-package telephone-line
+  :ensure t
+  :config
+  (require 'telephone-line)
+  (telephone-line-mode 1)
+
+  (setq telephone-line-lhs
+        '((accent . (telephone-line-vc-segment))
+          (nil    . (telephone-line-erc-modified-channels-segment
+                     telephone-line-process-segment
+                     telephone-line-buffer-segment)))))
+
+#+end_src
+
+***     Battery in Modeline
+
+#+begin_src emacs-lisp
+(display-battery-mode 1)
+#+end_src
+
+
+**   2.5 Editing Features
+
+***     Hippie Expand
+
+Highlight matching parenthesis
+
+Highlight row editing
+
+DOCUMENTATION
+-------------
+[[https://www.emacswiki.org/emacs/HippieExpand][HippieExpand EmacsWiki]]
+
+#+begin_src emacs-lisp
+
+;; Customizations relating to e1diting a buffer.
+
+;; Key binding to use "hippie expand" for text autocompletion
+;; http://www.emacswiki.org/emacs/HippieExpand
+(global-set-key (kbd "M-/") 'hippie-expand)
+
+;; Lisp-friendly hippie expand
+(setq hippie-expand-try-functions-list
+      '(try-expand-dabbrev
+        try-expand-dabbrev-all-buffers
+        try-expand-dabbrev-from-kill
+        try-complete-lisp-symbol-partially
+        try-complete-lisp-symbol))
+
+;; Highlights matching parenthesis
+(show-paren-mode 1)
+
+#+end_src
+
+***     Interactive Search
+
+#+begin_src emacs-lisp
+
+;; Interactive search key bindings. By default, C-s runs
+;; isearch-forward, so this swaps the bindings.
+(global-set-key (kbd "C-s") 'isearch-forward-regexp)
+(global-set-key (kbd "C-r") 'isearch-backward-regexp)
+(global-set-key (kbd "C-M-s") 'isearch-forward)
+(global-set-key (kbd "C-M-r") 'isearch-backward)
+
+#+end_src
+
+***     Backups into own folder
+#+begin_src emacs-lisp
+
+;; Emacs can automatically create backup files. This tells Emacs to
+;; put all backups in ~/.emacs.d/backups. More info:
+;; http://www.gnu.org/software/emacs/manual/html_node/elisp/Backup-Files.html
+(setq backup-directory-alist `(("." . ,(concat user-emacs-directory
+                                               "backups"))))
+(setq auto-save-default nil)
+
+;; No need for ~ files when editing
+(setq create-lockfiles nil)
+
+#+end_src
+
+***     Comment lines with C-;
+
+#+begin_src emacs-lisp
+
+;; comments
+(defun toggle-comment-on-line ()
+  "comment or uncomment current line"
+  (interactive)
+  (comment-or-uncomment-region (line-beginning-position) (line-end-position)))
+(global-set-key (kbd "C-;") 'toggle-comment-on-line)
+
+#+end_src
+
+***     Engine-Mode to quickly start searches from Emacs
+
+USE:
+----
+C-c / <search engine variable>
+
+DOCUMENTATION
+-------------
+[[https://github.com/hrs/engine-mode/blob/master/README.md][Engine Mode README]]
+[[https://www.youtube.com/watch?v%3DMBhJBMYfWUo][Intro video]]
+
+Browses in external Chrome
+
+Search Engine Variables:
+------------------------
+g - searches Google
+G - searches Github
+d - searches Duckduckgo
+S - searches Stackoverflow
+
+#+begin_src emacs-lisp
+(use-package engine-mode
+  :ensure t
+  :config
+  (engine-mode t)
+  (defengine duckduckgo
+    "https://duckduckgo.com/?q=%s"
+    :keybinding "d")
+  (defengine github
+    "https://github.com/search?ref=simplesearch&q=%s"
+    :keybinding "G")
+  (defengine stack-overflow
+  "https://stackoverflow.com/search?q=%s"
+    :keybinding "S")
+  (defengine google
+  "http://www.google.com/search?ie=utf-8&oe=utf-8&q=%s"
+  :keybinding "g"))
+#+end_src
+
+***     Search Dash Docsets quickly
+
+DOCUMENTATION
+-------------
+[[https://github.com/stanaka/dash-at-point][Dash at point README]]
+
+
+#+begin_src emacs-lisp
+(use-package dash-at-point
+  :ensure t
+  :config
+  (global-set-key "\C-cd" 'dash-at-point)
+  (global-set-key "\C-ce" 'dash-at-point-with-docset)
+  (add-to-list 'dash-at-point-mode-alist '(ruby-mode . "rails")))
+#+end_src
+
+***     Using Aspell for spell checking
+
+DOCUMENTATION
+-------------
+[[http://aspell.net/man-html/index.html][Aspell man pages]]
+
+Aspell needs to be installed through package manager:
+
+$ brew install aspell --with-lang-en
+
+Then need to set the default of ispell to aspell and point it to the actual program
+installed by Homebrew:
+
+(setq ispell-program-name "/usr/local/Cellar/aspell/0.60.6.1/bin/aspell")
+
+And finally, Flyspell is a minor-mode so need to enabled when different major modes are enabled.
+
+When finishing a file call 'ispell-buffer' to interactively walk through file.
+
+
+TODO: 
+- pop-ups with flyspell with no mouse etc - outlined on [[https://www.emacswiki.org/emacs/FlySpell][EmacsWiki Flyspell]]
+
+#+begin_src emacs-lisp
+(setq ispell-program-name "/usr/local/Cellar/aspell/0.60.6.1/bin/aspell")
+(add-hook 'text-mode-hook 'flyspell-mode)
+(add-hook 'prog-mode-hook 'flyspell-mode)
+(add-hook 'org-mode-hook 'flyspell-mode)
+#+end_src
+
+***     TODO Support for Apple Color Emoji
+
+https://stackoverflow.com/questions/22652888/display-all-unicode-characters-in-emacs-under-os-x
+
+#+begin_src emacs-lisp
+
+(use-package emojify
+  :ensure t
+  :config
+  (emojify-mode 1))
+(use-package ac-emoji
+  :ensure t
+  :config
+  (add-hook 'prog-mode-hook 'ac-emoji-setup)
+  (add-hook 'org-mode-hook 'ac-emoji-setup))
+
+(set-fontset-font
+ t 'symbol
+ (font-spec :family "Apple Color Emoji") nil 'prepend)
+
+#+end_src
+
+
+**   2.6 Multi-term as Terminal Emulator in Emacs
+
+DOCUMENTATION
+-------------
+[[https://www.emacswiki.org/emacs/MultiTerm][EmacsWiki]]
+TODO [[http://rawsyntax.com/blog/learn-emacs-fit-your-workflow/][Setting up keyboard command to jump between files and terminal]]
+
+#+begin_src emacs-lisp
+
+(use-package multi-term
+  :config
+  (setq multi-term-program "/usr/local/bin/bash"))
+
+;; unlimited buffer size
+(setq term-buffer-maximum-size 0)
+
+;; update Emacs exec-path
+(setenv "PATH" (concat (getenv "PATH") ":/usr/local/bin"))
+(setq exec-path (append exec-path '("/usr/local/bin")))
+
+#+end_src
+
+**   2.7 Vagrant Support for TRAMP
+Easily SSH into Vagrant box to edit files from within Emacs. 
+Wraps Emacs around `vagrant ssh`
+
+DOCUMENTATION
+-------------
+[[https://github.com/ottbot/vagrant.el][Vagrant README]]
+[[https://github.com/dougm/vagrant-tramp][Vagrant Tramp README]]
+
+#+begin_src emacs-lisp
+(use-package vagrant)
+(use-package vagrant-tramp)
+#+end_src
+
+
+
+* 3. Other Programs in Emacs
+
+**   3.1 Twittering in Emacs
+
+
+**   3.2 ERC - Emacs IRC
+
+#+begin_src emacs-lisp
+
+(setq erc-hide-list '("JOIN" "PART" "QUIT"))
+
+#+end_src
+
+
+**   3.3 PDF Tools
+
+#+begin_src emacs-lisp
+
+(use-package pdf-tools
+  :ensure t
+  :bind
+  ;; Load PDF server and bind to C-x P
+  ("C-x p" . pdf-tools-install))
+
+#+end_src
+     
+
+**   3.4 Org Mode
+
+DOCUMENTATION
+-------------
+[[http://www.howardism.org/Technical/Emacs/orgmode-wordprocessor.html][Emacs as Word Processor post]]
+
+#+begin_src emacs-lisp
+
+(setq org-hide-emphasis-markers t)
+;(require 'org-bullets)
+;(add-hook 'org-mode-hook (lambda () (org-bullets-mode 1)))
+
+#+end_src
+
+
+
+**   3.5 Conkeror links in EWW
+
+DOCUMENTATION
+-------------
+[[https://github.com/m00natic/eww-lnum][Eww Conkeror Links README]]
+
+#+begin_src emacs-lisp
+(use-package eww-lnum
+  :config
+  (eval-after-load "eww"
+  '(progn (define-key eww-mode-map "f" 'eww-lnum-follow)
+          (define-key eww-mode-map "F" 'eww-lnum-universal))))
+#+end_src
+
+
+* 4. Emacs Server
+
+Emacs daemon. Run as Server. Start at end of config
+so that all settings loaded in server.
+
+DOCUMENTATION
+-------------
+[[https://www.emacswiki.org/emacs/EmacsAsDaemon][Emacs Wiki]]
+[[http://emacs-fu.blogspot.com.au/2009/02/emacs-daemon.html][Emacs-Fu Post]]
+
+Setup remote hosts to use local Emacs instance:
+This post [[https://andy.wordpress.com/2013/01/03/automatic-emacsclient/][here]] and this [[http://blog.habnab.it/blog/2013/06/25/emacsclient-and-tramp/][post]].
+
+If doing editing on remote hosts then may want to investigate the following:
+#+begin_src emacs-lisp
+;(setq server-use-tcp t
+;  server-port 9999)
+;(defun server-start-and-copy-file ()
+;  (server-start)
+;  (copy-file "~/.emacs.d/server/server" "/rothko:.emacs.d/server/server" t))
+;(add-hook 'emacs-startup-hook 'server-start-and-copy-file)
+#+end_src
+
+Until then, the following is enough:
+Either:
+- place (server-start) in initial config; or 
+- remove and start emacs with --daemon option 
+Reference: [[https://www.gnu.org/software/emacs/manual/html_node/emacs/Emacs-Server.html][GNU Emacs Manual 'Using Emacs as a Server']]
+#+begin_src emacs-lisp
+(server-start)
+#+end_src
+
+	
+
+* 5. TODO Section
+
+**   DONE PDF Setup
+
+**   TODO IRC setup
+
+**   DONE Spellchecking
+
+**   TODO Font selection
+
+**   TODO Change themes with kbd
+
+**   TODO Org Mode
+
+**   DONE Searching via keyboard (engine-mode/Dash)
+
+
+* Appendix: Summary of all Packages Installed 
+
+  Details of each are outlined in the body of file
+
+   |---------------------------------+---------------------------------------------------|
+   | *Package*                         | *Description*                                       |
+   |---------------------------------+---------------------------------------------------|
+   | 1. Clojure Development          |                                                   |
+   |---------------------------------+---------------------------------------------------|
+   | paredit                         | keep parentheses balanced                         |
+   | clojure-mode                    | clojure editining major mode                      |
+   | clojure-mode-extra-font-locking | more fancy clojure                                |
+   | cider                           | clojure repl                                      |
+   | ido-ubiquitous                  | completion everywhere                             |
+   | helm                            | m-x replacement                                   |
+   | rainbow delimiters              | pretty parentheses                                |
+   | rvm                             | rvm integration for emacs                         |
+   | tagedit                         | for editing html tags like sexp                   |
+   | web-mode                        | web editing major mode                            |
+   | magit                           | git in emacs                                      |
+   |---------------------------------+---------------------------------------------------|
+   | 2. Emacs Configuration          |                                                   |
+   |---------------------------------+---------------------------------------------------|
+   | ido-ubiquitous                  | use ido in more than file/buffer searches         |
+   | helm                            | M-x booster                                       |
+   | smex (currently uninstalled)    | ido in the M-x (uninstalled in favour of Helm     |
+   | telephone-line                  | modeline enhancement                              |
+   | atom-one-dark-theme             | atom editor color theme                           |
+   | multi-term                      | multiple instances of Term (not Shell)            |
+   | engine-mode                     | search quickly from emacs                         |
+   | dash-at-point                   | search Dash docsets quickly from Emacs            |
+   |                                 |                                                   |
+   | eww-lnum                        | add numbers to links in Emacs EWW (like Conkeror) |
+   |                                 |                                                   |
+   |---------------------------------+---------------------------------------------------|
+
+                                                           
+
+
+    
+
+
+
+
+
+
+
+
+
+
